@@ -218,7 +218,9 @@ def main(time_slot):
     if time_slot:
         slot = check_availability(slots, time_slot)
         if slot:
-            cr.reserve(slot[2])
+            print(f'Reserving court {prettify_slot(slot)}')
+            sleep(1)
+            #cr.reserve(slot[2])
         else:
             print(f"{time_slot} is not available")
         
