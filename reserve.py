@@ -1,27 +1,35 @@
 #!/usr/bin/env python
+from enum import Enum
 from time import sleep
 import os
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import time
 import json
 from tty import CFLAG
+from typing import Dict, List, NewType, Optional, Tuple
 import click
 from pprint import pprint
 from dotenv import dotenv_values
 from selenium import webdriver
+from selenium.webdriver.chrome.webdriver import WebDriver as ChromeDriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.common.action_chains import ActionChains
+
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 
-GROUPS = [
-    "Mercer County Outdoor Tennis Courts S1, S2, G1, G2, 7-12", # 7:30 pm
-    "Mercer County Outdoor Tennis Courts 19-24", # 6:30 PM
-    "Mercer County Outdoor Tennis Courts 13-18", # 7:00 PM
+Court = NewType('Court', str)
+Slot = NewType('Slot', Tuple[datetime, Court, WebElement])
+GroupName = NewType('GroupName', str)
+GROUPS : List[GroupName] = [
+    GroupName("Mercer County Outdoor Tennis Courts S1, S2, G1, G2, 7-12"), # 7:30 pm
+    GroupName("Mercer County Outdoor Tennis Courts 19-24"), # 6:30 PM
+    GroupName("Mercer County Outdoor Tennis Courts 13-18"), # 7:00 PM
 ]
-slot_to_group = {
+slot_to_group: Dict[Tuple[int, int], int] = {
     (7,30): 0,
     (8,0): 1,
     (8,30): 2,
@@ -51,47 +59,41 @@ slot_to_group = {
     (20,30): 2,
     (21,0): 0,
 }
-cfg = {
+cfg : Dict[str, Optional[str]] = {
         **dotenv_values(".env"),
         **os.environ,
 }
-print( f'User={cfg["CR_USER"]}/Password={cfg["CR_PASSWORD"]}')
+# print( f'User={cfg["CR_USER"]}/Password={cfg["CR_PASSWORD"]}')
 
-def get_attrs(driver, elem):
+def get_attrs(driver: ChromeDriver, elem: WebElement) -> Dict[str, str]:
     return driver.execute_script('var items = {}; for (index = 0; index < arguments[0].attributes.length; ++index) { items[arguments[0].attributes[index].name] = arguments[0].attributes[index].value }; return items;', elem)
 
-def get_slot_info(driver, elem):
+def get_slot_info(driver: ChromeDriver, elem: WebElement) -> Slot:
     slot = get_attrs(driver, elem)
     time_str = slot['start'][:24]
     # format looks like "Mon Jun 06 2022 22:00:00"
     start = datetime.strptime(time_str, '%a %b %d %Y %H:%M:%S')
-    court = slot['courtlabel']
-    return [start, court, elem]
+    court = Court(slot['courtlabel'])
+    return Slot((start, court, elem))
 
-def prettify_slot(slot):
+def prettify_slot(slot: Slot) -> str:
     start = slot[0].strftime("%Y-%m-%d %H:%M")
     court = slot[1]
     return f"{start} {court}"
-    court = slot[1]
-    return f'{start} {court}'
 
-def get_slots(driver):
-    raw_slots = driver.find_elements(
+def get_slots(driver: ChromeDriver) -> List[Slot]:
+    raw_slots:List[WebElement] = driver.find_elements(
             By.CSS_SELECTOR,
             "button.slot-btn:not(.hide)"
         )
     slots = sorted([get_slot_info(driver, slot) for slot in raw_slots])
     return slots
 
-
-def get_group_slots(group):
-    pass
-
-def navigate_to_group(driver, group):
+def navigate_to_group(driver: ChromeDriver, group: GroupName) -> None:
     """
     Navigate to the Court group page
     """
-    reservations_menu = driver.find_element(
+    reservations_menu: WebElement = driver.find_element(
         By.CSS_SELECTOR, "#respMenu > .fn-ace-parent-li:nth-child(2) .arrow"
     )
     actions = ActionChains(driver)
@@ -101,7 +103,7 @@ def navigate_to_group(driver, group):
         By.LINK_TEXT, group
     ).click()
 
-def advance_day(driver, days):
+def advance_day(driver: ChromeDriver, days: int) -> None:
     """
     Navigate to the day
     """
@@ -113,7 +115,7 @@ def advance_day(driver, days):
     for i in range(days):
         next_day_btn.click()
 
-def get_curr_date(driver):
+def get_curr_date(driver: ChromeDriver) -> datetime:
     mdy = driver.find_element(
         By.CSS_SELECTOR,
         "span.k-sm-date-format"
@@ -121,9 +123,19 @@ def get_curr_date(driver):
     date = datetime.strptime(mdy, "%m/%d/%Y")
     return date
 
-def get_group_slots(driver, group):
+def get_group_slots(driver: ChromeDriver, group: GroupName) -> List[Slot]:
     navigate_to_group(driver, group)
     sleep(1)
+
+    reservations = driver.find_elements(
+        By.CSS_SELECTOR,
+        "div.reservation-container"
+    )
+    print("Found {} reservations".format(len(reservations)))
+    if reservations: 
+        print("Found a reservation in your name for this date")
+        return []
+
     date = driver.find_element(
         By.CSS_SELECTOR,
         "span.k-sm-date-format"
@@ -131,18 +143,20 @@ def get_group_slots(driver, group):
     print(f"DBG5: {date}")
     return get_slots(driver)
 
-def check_availability(slots, desired_time_str):
+def check_availability(slots: List[Slot], desired_time_str: str) -> Optional[Slot]:
     desired_time = datetime.strptime(desired_time_str, "%Y-%m-%d_%H:%M")
     for slot in slots:
         if slot[0] == desired_time:
             return slot
     return None
 
-def login(driver, site):
+def login(driver: ChromeDriver, site: str) -> None:
     driver.get(site)
     driver.set_window_size(1419, 1602)
+    sleep(3)
     logout = driver.find_elements(By.LINK_TEXT, "Log out")
     if not logout:
+        print("DBG1: Logging in")
         # we are NOT logged in  
         # logout[0].click()
         driver.find_element(By.LINK_TEXT, "LOG IN").click()
@@ -154,6 +168,8 @@ def login(driver, site):
         driver.find_element(By.CSS_SELECTOR, ".btn-log").click()    
 
 class CourtReserve:
+    driver: ChromeDriver
+
     def __init__(self):
         self.driver = webdriver.Chrome()
         self.vars = {}
@@ -161,50 +177,47 @@ class CourtReserve:
     def teardown(self, method):
         self.driver.quit()
     
-    def navigate_to_date(self, date):
-        pass
-
-    def get_slots(self, time_slot):
-        login(self.driver, cfg['CR_SITE']) # "")
+    def get_slots(self, desired_time: datetime) -> List[Slot]:
+        site = cfg["CR_SITE"]
+        assert site is not None
+        login(self.driver, site)
         slots = []
-        desired_time = datetime.strptime(time_slot, "%Y-%m-%d_%H:%M")
         hour, minute = desired_time.time().hour, desired_time.time().minute
 
         group = GROUPS[slot_to_group[(hour, minute)]]
         navigate_to_group(self.driver, group)
 
-        page_date = get_curr_date(self.driver)
+        page_date = get_curr_date(self.driver).date()
 
-
-        while page_date.date() < desired_time.date():
-            advance_day(self.driver, 1)
-            page_date = get_curr_date(self.driver)
+        desired_day: date = desired_time.date()
+        days_to_advance = (desired_day - page_date).days
+        advance_day(self.driver, days_to_advance)
         slots += get_group_slots(self.driver, group)
-        advance_day(self.driver, 1)
 
         return sorted(slots)
 
-    def show_slots(self, slots):
+    def show_slots(self, slots: List[Slot]) -> None:
         #slots = self.get_slots()
         pprint([prettify_slot(slot) for slot in slots])
         
 
-    def reserve(self, slot):
+    def reserve(self, slot: WebElement) -> None:
         driver = self.driver
         # Click to Reserve
         slot.click()
-        sleep(1)
+        sleep(3)
         # Click on Save to Save Reservation
         driver.find_element(
             By.XPATH,
             "//button[contains(text(),'Save')]"
         ).click()
+        sleep(3)
         # Close the popup
         driver.find_element(
             By.XPATH,
             "//button[contains(text(),'Close')]"
         ).click()
-        sleep(1)
+        sleep(3)
 
 
 @click.command()
@@ -212,17 +225,23 @@ class CourtReserve:
 # @click.option('--name', prompt='Your name',
 #               help='The person to greet.')
 def main(time_slot):
+    assert time_slot is not None
+    desired_time: datetime = datetime.strptime(time_slot, "%Y-%m-%d_%H:%M")
+    desired_day: date = desired_time.date()
+    assert desired_day >= date.today() and \
+        desired_day <= date.today() + timedelta(days=3), \
+            f"{desired_day} is not in the next 3 days"
+
     cr = CourtReserve()
-    slots = cr.get_slots(time_slot)
+
+    slots = cr.get_slots(desired_time)
     cr.show_slots(slots)
-    if time_slot:
-        slot = check_availability(slots, time_slot)
-        if slot:
-            print(f'Reserving court {prettify_slot(slot)}')
-            sleep(1)
-            #cr.reserve(slot[2])
-        else:
-            print(f"{time_slot} is not available")
+    slot = check_availability(slots, time_slot)
+    if slot:
+        print(f'Reserving court {prettify_slot(slot)}')
+        cr.reserve(slot[2])
+    else:
+        print(f"{time_slot} is not available")
         
     
 if __name__ == "__main__":
