@@ -9,5 +9,6 @@ Install Python, selenium and chromedriver.
 copy `.env.sample` as `.env` and edit user/password
 
 ## Example Running
+
 DATE=$(date -d tomorrow +%Y-%m-%d)
 `./reserve.py --time_slot ${DATE}_21:00`
