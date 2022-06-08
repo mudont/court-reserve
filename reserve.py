@@ -44,45 +44,43 @@ GROUPS: List[GroupName] = [
         "Mercer County Outdoor Tennis Courts 13-18"
     ),  # 8:30 AM, every 90 minutes after that
 ]
-#
-# All possible time slots and their court group
-slot_to_group: Dict[Tuple[int, int], int] = {
-    (7, 30): 0,
-    (8, 0): 1,
-    (8, 30): 2,
-    (9, 0): 0,
-    (9, 30): 1,
-    (10, 0): 2,
-    (10, 30): 0,
-    (11, 0): 1,
-    (11, 30): 2,
-    (12, 0): 0,
-    (12, 30): 1,
-    (13, 0): 2,
-    (13, 30): 0,
-    (14, 0): 1,
-    (14, 30): 2,
-    (15, 0): 0,
-    (15, 30): 1,
-    (16, 0): 2,
-    (16, 30): 0,
-    (17, 0): 1,
-    (17, 30): 2,
-    (18, 0): 0,
-    (18, 30): 1,
-    (19, 0): 2,
-    (19, 30): 0,
-    (20, 0): 1,
-    (20, 30): 2,
-    (21, 0): 0,
-}
+
+
+def get_group_for_time(desired_time: datetime) -> GroupName:
+    """
+    Get the group for a time slot
+    Eg: Group for 7:30 pm is "...S1, S2, G1, G2, 7-12",
+        Group for 6:30 pm is "...19-24"
+    """
+
+    def add_time(hhmm: Tuple[int, int], minutes_to_add) -> Tuple[int, int]:
+        """
+        Add minutes to a datetime object
+        """
+        hour, minute = hhmm
+        tot_minutes = hour * 60 + minute + minutes_to_add
+        return tot_minutes // 60, tot_minutes % 60
+
+    #
+    # First time slots and their court group
+    slot_to_group: Dict[Tuple[int, int], int] = {
+        (7, 30): 0,
+        (8, 0): 1,
+        (8, 30): 2,
+    }
+    time_slot = desired_time.time().hour, desired_time.time().minute
+
+    while time_slot not in slot_to_group:
+        time_slot = add_time(time_slot, -90)
+
+    return GROUPS[slot_to_group[time_slot]]
+
 
 # Configuration or environment variables
 cfg: Dict[str, Optional[str]] = {
     **dotenv_values(".env"),
     **os.environ,
 }
-# print( f'User={cfg["CR_USER"]}/Password={cfg["CR_PASSWORD"]}')
 
 
 def make_driver():
@@ -218,9 +216,8 @@ def get_slots_for_datetime(driver: ChromeDriver, desired_time: datetime) -> List
     site = cfg["CR_SITE"]
     assert site is not None
     login(driver, site)
-    hour, minute = desired_time.time().hour, desired_time.time().minute
 
-    group = GROUPS[slot_to_group[(hour, minute)]]
+    group = get_group_for_time(desired_time)
     navigate_to_group(driver, group)
 
     page_date = get_curr_date(driver).date()
@@ -251,8 +248,6 @@ def reserve_slot(driver: ChromeDriver, slot: WebElement) -> None:
 
 @click.command()
 @click.option("--time_slot", help="Reserve date time. eg: 2022-06-18_19:00")
-# @click.option('--name', prompt='Your name',
-#               help='The person to greet.')
 def main(time_slot):
     # Validate time slot
     assert time_slot is not None
